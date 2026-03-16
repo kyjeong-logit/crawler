@@ -2,8 +2,6 @@ name: Resolve Danawa Final URLs
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 */6 * * *"
 
 jobs:
   resolve:
@@ -17,8 +15,17 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
+
+      - name: Debug
+        run: |
+          pwd
+          ls -la
+          ls -la scripts
+          node -v
+          npm -v
+          cat package.json
 
       - name: Install packages
         run: npm install
@@ -30,7 +37,8 @@ jobs:
         run: npm run resolve
 
       - name: Upload result artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: danawa-resolved
-          path: data/danawa-resolved.json
+          path: data/
