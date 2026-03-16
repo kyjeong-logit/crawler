@@ -10,25 +10,31 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: "npm"
 
-      - name: Debug
+      - name: Debug environment
         run: |
-          pwd
+          echo "PWD=$(pwd)"
           ls -la
+          echo "--- scripts ---"
           ls -la scripts
+          echo "--- node ---"
           node -v
+          which node
+          echo "--- npm ---"
           npm -v
+          which npm
+          echo "--- package.json ---"
           cat package.json
 
       - name: Install packages
-        run: npm install
+        run: npm ci
 
       - name: Install Playwright Chromium
         run: npx playwright install chromium --with-deps
