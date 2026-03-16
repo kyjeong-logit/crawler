@@ -22,7 +22,7 @@ jobs:
         run: npm install
 
       - name: Run crawler
-        run: node resolve-danawa.js
+        run: node scripts/resolve-danawa.js
 
       - name: Save JSON to Supabase
         env:
