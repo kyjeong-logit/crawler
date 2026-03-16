@@ -8,10 +8,10 @@ const KEYWORDS = [
 ];
 
 const START_PAGE = 1;
-const END_PAGE = 2;
+const END_PAGE = 1;
 
 // 액션 시간/차단 방지용
-const MAX_ITEMS_PER_PAGE = 30;
+const MAX_ITEMS_PER_PAGE = 5;
 const SLEEP_BETWEEN_LIST_PAGES_MS = 1200;
 const SLEEP_BETWEEN_RESOLVE_MS = 1200;
 
@@ -110,7 +110,20 @@ function normalizeUrl(raw) {
       "service",
       "from",
       "tr",
-      "inflow"
+      "inflow",
+      "src",
+      "spec",
+      "addtag",
+      "ctag",
+      "lptag",
+      "itime",
+      "pageType",
+      "pageValue",
+      "wPcid",
+      "wRef",
+      "wTime",
+      "redirect",
+      "mcid"
     ].forEach((k) => u.searchParams.delete(k));
 
     u.hash = "";
@@ -301,216 +314,296 @@ async function waitForFinalUrl(page, timeoutMs = 15000) {
 async function scrapeDanawaListPage(page, { keyword, pageNo }) {
   const danawaListUrl = buildSearchUrl(keyword, pageNo);
 
+  console.log(`[DEBUG] open list url -> ${danawaListUrl}`);
+
   await page.goto(danawaListUrl, {
     waitUntil: "domcontentloaded",
     timeout: 30000
   });
 
   await page.waitForLoadState("networkidle").catch(() => {});
-  await sleep(1500);
+  await sleep(2500);
 
-  const items = await page.evaluate(({ keyword, pageNo, danawaListUrl, maxItemsPerPage }) => {
-    function cleanText(v) {
-      return String(v || "")
-        .replace(/\u00a0/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-    }
-
-    function pickFirstText(root, selectors, options = {}) {
-      const {
-        minLength = 1,
-        rejectValues = [],
-        rejectIncludes = []
-      } = options;
-
-      for (const selector of selectors) {
-        const nodes = Array.from(root.querySelectorAll(selector));
-        for (const node of nodes) {
-          const text = cleanText(node.textContent || node.innerText || "");
-          if (!text) continue;
-          if (text.length < minLength) continue;
-          if (rejectValues.includes(text)) continue;
-          if (rejectIncludes.some((x) => text.includes(x))) continue;
-          return text;
-        }
-      }
-      return "";
-    }
-
-    function pickHref(root, selectors) {
-      for (const selector of selectors) {
-        const nodes = Array.from(root.querySelectorAll(selector));
-        for (const node of nodes) {
-          const href = node.href || node.getAttribute("href") || "";
-          if (href) return href;
-        }
-      }
-      return "";
-    }
-
-    function pickPrice(root) {
-      const selectors = [
-        ".price_sect .price_tier .num",
-        ".prod_pricelist .price_sect .num",
-        ".main_price .num",
-        ".price .num",
-        "[class*='price'] .num",
-        "strong[class*='price']",
-        ".num"
-      ];
-
-      for (const selector of selectors) {
-        const nodes = Array.from(root.querySelectorAll(selector));
-        for (const node of nodes) {
-          const text = cleanText(node.textContent || "");
-          const price = text.replace(/[^\d]/g, "");
-          if (price) return price;
-        }
-      }
-      return "";
-    }
-
-    function pickRegDate(root) {
-      const wholeText = cleanText(root.textContent || "");
-
-      const m = wholeText.match(/\d{2}\.\d{2}\.\s*등록/);
-      if (m) return cleanText(m[0]);
-
-      const m2 = wholeText.match(/\d{2}\.\d{2}\./);
-      if (m2) return `${cleanText(m2[0])} 등록`;
-
-      return "";
-    }
-
-    function pickDelivery(root) {
-      const candidates = [];
-
-      const selectors = [
-        ".price_sect .stxt",
-        ".price_sect .delivery_info",
-        ".delivery_info",
-        ".delivery",
-        "[class*='delivery']",
-        "[class*='ship']"
-      ];
-
-      for (const selector of selectors) {
-        const nodes = Array.from(root.querySelectorAll(selector));
-        for (const node of nodes) {
-          const text = cleanText(node.textContent || "");
-          if (!text) continue;
-          candidates.push(text);
-        }
+  const payload = await page.evaluate(
+    ({ keyword, pageNo, danawaListUrl, maxItemsPerPage }) => {
+      function cleanText(v) {
+        return String(v || "")
+          .replace(/\u00a0/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
       }
 
-      for (const text of candidates) {
-        if (text.includes("무료배송")) return "무료배송";
+      function isBadSectionText(text) {
+        const t = cleanText(text);
+        return (
+          !t ||
+          t.includes("오늘 봐야 할 추천 상품") ||
+          t.includes("이런 상품 어때요") ||
+          t.includes("추천상품") ||
+          t.includes("광고")
+        );
       }
 
-      for (const text of candidates) {
-        if (text.includes("배송비")) return text;
+      function isAdOrRecommendRow(row) {
+        if (!row) return true;
+
+        const cls = String(row.className || "").toLowerCase();
+        const rowText = cleanText(row.textContent || "");
+
+        if (cls.includes("ad")) return true;
+        if (cls.includes("advert")) return true;
+        if (cls.includes("recommend")) return true;
+        if (cls.includes("power")) return true;
+
+        if (rowText.includes("오늘 봐야 할 추천 상품")) return true;
+        if (rowText.includes("이런 상품 어때요")) return true;
+        if (rowText.includes("추천상품")) return true;
+
+        return false;
       }
 
-      return "";
-    }
-
-    const rows = Array.from(
-      document.querySelectorAll(
-        ".prod_list > ul > li.prod_item, .main_prodlist > ul > li.prod_item, li.prod_item"
-      )
-    );
-
-    const out = [];
-    const seen = new Set();
-    let rank = 0;
-
-    for (const row of rows) {
-      const rowText = cleanText(row.textContent || "");
-      if (!rowText) continue;
-
-      if (rowText.includes("이런 상품 어때요")) continue;
-      if (row.classList.contains("advertising")) continue;
-      if (row.classList.contains("ad_item")) continue;
-      if (row.classList.contains("product-pot")) continue;
-
-      const danawaLinkHref = pickHref(row, [
-        ".prod_info .prod_name a[href]",
-        "p.prod_name a[href]",
-        ".prod_name a[href]",
-        "a[name='productName'][href]",
-        "a[href*='prod.danawa.com/bridge/']",
-        "a[href*='loadingBridge']",
-        "a[href*='prod.danawa.com']"
-      ]);
-
-      if (!danawaLinkHref) continue;
-      if (seen.has(danawaLinkHref)) continue;
-      seen.add(danawaLinkHref);
-
-      const title = pickFirstText(
-        row,
-        [
+      function pickProductTitle(row) {
+        const selectors = [
           ".prod_info .prod_name a",
           "p.prod_name a",
           ".prod_name a",
-          "a[name='productName']",
-          "a[title]"
-        ],
-        {
-          minLength: 3,
-          rejectValues: ["관심", "찜", "비교", "보기", "등록", "장바구니"],
-          rejectIncludes: ["관심상품", "비교하기", "장바구니"]
+          "a[name='productName']"
+        ];
+
+        for (const selector of selectors) {
+          const el = row.querySelector(selector);
+          if (!el) continue;
+
+          const text = cleanText(el.textContent || el.innerText || "");
+          if (!text) continue;
+          if (text.length < 3) continue;
+          if (/\d[\d,]*원/.test(text)) continue;
+          if (/무료배송|배송비|가격비교|관심상품|상품분류/.test(text)) continue;
+
+          return text;
         }
+
+        return "";
+      }
+
+      function pickProductLink(row) {
+        const selectors = [
+          ".prod_info .prod_name a[href]",
+          "p.prod_name a[href]",
+          ".prod_name a[href]",
+          "a[name='productName'][href]"
+        ];
+
+        for (const selector of selectors) {
+          const el = row.querySelector(selector);
+          if (!el) continue;
+          const href = el.href || el.getAttribute("href") || "";
+          if (href) return href;
+        }
+
+        return "";
+      }
+
+      function pickMallAnchor(row) {
+        const selectors = [
+          "div.price_info li a.click_log_product_searched_price_",
+          "ul.prod_pricelist li a.click_log_product_searched_price_",
+          ".price_info li a",
+          ".prod_pricelist li a"
+        ];
+
+        for (const selector of selectors) {
+          const anchors = Array.from(row.querySelectorAll(selector));
+          for (const a of anchors) {
+            const txt = cleanText(a.textContent || "");
+            if (!txt) continue;
+            return a;
+          }
+        }
+
+        return null;
+      }
+
+      function pickMallName(row, mallAnchor) {
+        const img =
+          mallAnchor?.querySelector(".mall_icon img[alt]") ||
+          mallAnchor?.querySelector("p.mall_icon img[alt]");
+
+        const alt = cleanText(img?.getAttribute("alt") || "");
+        if (
+          alt &&
+          !/\d[\d,]*원/.test(alt) &&
+          !/무료배송|배송비|가격비교|관심상품|상품분류/.test(alt)
+        ) {
+          return alt;
+        }
+
+        const fallbackText = cleanText(
+          mallAnchor?.querySelector(".mall_icon")?.textContent || ""
+        );
+        if (
+          fallbackText &&
+          !/\d[\d,]*원/.test(fallbackText) &&
+          !/무료배송|배송비|가격비교|관심상품|상품분류/.test(fallbackText)
+        ) {
+          return fallbackText;
+        }
+
+        return "";
+      }
+
+      function pickMallLinkHref(mallAnchor) {
+        if (!mallAnchor) return "";
+        return mallAnchor.href || mallAnchor.getAttribute("href") || "";
+      }
+
+      function pickPrice(row, mallAnchor) {
+        const texts = [];
+
+        const strong = cleanText(
+          mallAnchor?.querySelector(".price_sect strong")?.textContent || ""
+        );
+        if (strong) texts.push(strong);
+
+        const priceSect = cleanText(
+          mallAnchor?.querySelector(".price_sect")?.textContent || ""
+        );
+        if (priceSect) texts.push(priceSect);
+
+        const rowText = cleanText(row.textContent || "");
+        if (rowText) texts.push(rowText);
+
+        for (const text of texts) {
+          const m = text.match(/([0-9][0-9,]{2,})\s*원/);
+          if (m && m[1]) {
+            return m[1].replace(/[^\d]/g, "");
+          }
+        }
+
+        for (const text of texts) {
+          const arr = text.match(/[0-9][0-9,]{2,}/g) || [];
+          for (const v of arr) {
+            const num = v.replace(/[^\d]/g, "");
+            if (!num) continue;
+            if (Number(num) < 1000) continue;
+            return num;
+          }
+        }
+
+        return "";
+      }
+
+      function pickDelivery(row, mallAnchor) {
+        const shipText = cleanText(
+          mallAnchor?.querySelector(".ship_sect")?.textContent || ""
+        );
+        if (shipText) {
+          if (shipText.includes("무료배송")) return "무료배송";
+          if (shipText.includes("배송비")) return shipText;
+        }
+
+        const rowText = cleanText(row.textContent || "");
+        if (rowText.includes("무료배송")) return "무료배송";
+
+        const m = rowText.match(/배송비\s*[^\s]+/);
+        if (m) return cleanText(m[0]);
+
+        return "";
+      }
+
+      function pickRegDate(row) {
+        const text = cleanText(row.textContent || "");
+        const m1 = text.match(/\d{2}\.\d{2}\.\s*등록/);
+        if (m1) return cleanText(m1[0]);
+
+        const m2 = text.match(/\d{2}\.\d{2}\./);
+        if (m2) return `${cleanText(m2[0])} 등록`;
+
+        return "";
+      }
+
+      const rows = Array.from(
+        document.querySelectorAll("li.prod_item, li[class*='prod_item']")
       );
 
-      const mallName = pickFirstText(
-        row,
-        [
-          ".price_sect .mall_name",
-          ".mall_name",
-          ".seller_name",
-          ".seller",
-          ".shop_name",
-          "[class*='mall_name']",
-          "[class*='seller']",
-          "[class*='shop']"
-        ],
-        {
-          minLength: 2,
-          rejectValues: ["관심", "찜", "비교", "구매"],
-          rejectIncludes: ["장바구니", "비교하기", "구매하기"]
+      const out = [];
+      const seen = new Set();
+      const debugSamples = [];
+
+      for (const row of rows) {
+        if (!row) continue;
+        if (isAdOrRecommendRow(row)) continue;
+
+        const rowText = cleanText(row.textContent || "");
+        if (!rowText) continue;
+        if (isBadSectionText(rowText)) continue;
+
+        const title = pickProductTitle(row);
+        const productLinkHref = pickProductLink(row);
+        const mallAnchor = pickMallAnchor(row);
+        const danawaLinkHref = pickMallLinkHref(mallAnchor) || productLinkHref;
+        const mallName = pickMallName(row, mallAnchor);
+        const price = pickPrice(row, mallAnchor);
+        const regDate = pickRegDate(row);
+        const delivery = pickDelivery(row, mallAnchor);
+
+        if (debugSamples.length < 5) {
+          debugSamples.push({
+            title,
+            danawaLinkHref,
+            price,
+            mallName,
+            regDate,
+            delivery,
+            rowText: rowText.slice(0, 220)
+          });
         }
-      );
 
-      const price = pickPrice(row);
-      const regDate = pickRegDate(row);
-      const delivery = pickDelivery(row);
+        if (!title) continue;
+        if (!danawaLinkHref) continue;
+        if (!price) continue;
 
-      if (!title || !price) continue;
+        const dedupeKey = `${title}|||${price}|||${danawaLinkHref}`;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
 
-      rank += 1;
+        out.push({
+          keyword,
+          page: pageNo,
+          rank: out.length + 1,
+          title,
+          regDate,
+          mallName,
+          price,
+          delivery,
+          danawaListUrl,
+          danawaLinkHref
+        });
 
-      out.push({
-        keyword,
-        page: pageNo,
-        rank,
-        title,
-        regDate,
-        mallName,
-        price,
-        delivery,
-        danawaListUrl,
-        danawaLinkHref
-      });
+        if (out.length >= maxItemsPerPage) break;
+      }
 
-      if (out.length >= maxItemsPerPage) break;
-    }
+      return {
+        rowCount: rows.length,
+        extractedCount: out.length,
+        debugSamples,
+        items: out
+      };
+    },
+    { keyword, pageNo, danawaListUrl, maxItemsPerPage: MAX_ITEMS_PER_PAGE }
+  );
 
-    return out;
-  }, { keyword, pageNo, danawaListUrl, maxItemsPerPage: MAX_ITEMS_PER_PAGE });
+  console.log(
+    `[DEBUG] ${keyword} / page ${pageNo} -> rows=${payload.rowCount}, extracted=${payload.extractedCount}`
+  );
 
-  return items.map((item) => ({
+  if (payload.debugSamples?.length) {
+    console.log(
+      `[DEBUG SAMPLES] ${keyword} / page ${pageNo}\n${JSON.stringify(payload.debugSamples, null, 2)}`
+    );
+  }
+
+  return payload.items.map((item) => ({
     ...item,
     bridgeUrl: item.danawaLinkHref.startsWith("http")
       ? item.danawaLinkHref
