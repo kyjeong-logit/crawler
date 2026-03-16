@@ -1,0 +1,11 @@
+{
+  "name": "danawa-affiliate-resolver",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "resolve": "node scripts/resolve-danawa.js"
+  },
+  "dependencies": {
+    "playwright": "^1.52.0"
+  }
+}
