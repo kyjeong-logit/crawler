@@ -1,0 +1,36 @@
+name: Resolve Danawa Final URLs
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install packages
+        run: npm install
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Resolve final URLs
+        run: npm run resolve
+
+      - name: Upload result artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: danawa-resolved
+          path: data/danawa-resolved.json
