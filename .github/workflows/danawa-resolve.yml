@@ -6,6 +6,9 @@ on:
 jobs:
   resolve:
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
+
     timeout-minutes: 60
 
     steps:
@@ -18,26 +21,17 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Debug environment
+      - name: Debug
         run: |
-          echo "PWD=$(pwd)"
+          pwd
           ls -la
-          echo "--- scripts ---"
           ls -la scripts
-          echo "--- node ---"
           node -v
-          which node
-          echo "--- npm ---"
           npm -v
-          which npm
-          echo "--- package.json ---"
           cat package.json
 
       - name: Install packages
         run: npm ci
-
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium --with-deps
 
       - name: Resolve final URLs
         run: npm run resolve
