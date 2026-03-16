@@ -1,0 +1,58 @@
+import fs from "fs/promises";
+import { createClient } from "@supabase/supabase-js";
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+const RAW_FILE = "data/danawa-resolved.json";
+
+function toIntPrice(v) {
+  const n = String(v || "").replace(/[^\d]/g, "");
+  return n ? Number(n) : null;
+}
+
+async function main() {
+  const raw = await fs.readFile(RAW_FILE, "utf8");
+  const json = JSON.parse(raw);
+
+  const crawlBatchId =
+    json.collectedAt?.replace(/[:.]/g, "-") || new Date().toISOString().replace(/[:.]/g, "-");
+
+  const rows = (json.results || []).map((item) => ({
+    source: "danawa",
+    keyword: item.keyword || null,
+    raw_title: item.title || null,
+    mall_name: item.mallName || null,
+    price: toIntPrice(item.price),
+    delivery: item.delivery || null,
+    final_product_url: item.finalProductUrl || null,
+    collected_at: json.collectedAt || new Date().toISOString(),
+    crawl_batch_id: crawlBatchId
+  }));
+
+  const validRows = rows.filter((r) => r.keyword && r.raw_title);
+
+  if (!validRows.length) {
+    console.log("No valid rows to insert.");
+    return;
+  }
+
+  const { error } = await supabase.from("raw_prices").insert(validRows);
+
+  if (error) {
+    throw error;
+  }
+
+  console.log(`Inserted ${validRows.length} rows into raw_prices`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
