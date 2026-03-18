@@ -4,14 +4,17 @@ import { chromium } from "playwright";
 
 const KEYWORDS = [
   "삼다수 2L",
-  "삼다수 500ml"
+  "삼다수 500ml",
+  "삼다수 330ml",
+  "가야워터 2L",
+  "가야워터 500ml",  
 ];
 
 const START_PAGE = 1;
-const END_PAGE = 1;
+const END_PAGE = 3;
 
 // 액션 시간/차단 방지용
-const MAX_ITEMS_PER_PAGE = 5;
+const MAX_ITEMS_PER_PAGE = 120;
 const SLEEP_BETWEEN_LIST_PAGES_MS = 1200;
 const SLEEP_BETWEEN_RESOLVE_MS = 1200;
 
