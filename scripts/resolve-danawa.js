@@ -73,6 +73,21 @@ function buildSearchUrl(keyword, page) {
   return url.toString();
 }
 
+function parseShippingFee(deliveryText) {
+  const text = cleanText(deliveryText);
+
+  if (!text) return null;
+  if (text.includes("무료배송")) return 0;
+  if (text.includes("배송비 무료")) return 0;
+
+  const match = text.match(/배송비\s*([0-9][0-9,]*)\s*원/);
+  if (match?.[1]) {
+    return Number(match[1].replace(/[^\d]/g, ""));
+  }
+
+  return null;
+}
+
 function normalizeUrl(raw) {
   const parsed = safeUrl(raw);
   if (!parsed) return null;
@@ -511,6 +526,21 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
         return "";
       }
 
+    function parseShippingFee(deliveryText) {
+      const text = cleanText(deliveryText);
+
+      if (!text) return null;
+      if (text.includes("무료배송")) return 0;
+      if (text.includes("배송비 무료")) return 0;
+
+      const match = text.match(/배송비\s*([0-9][0-9,]*)\s*원/);
+      if (match?.[1]) {
+        return Number(match[1].replace(/[^\d]/g, ""));
+      }
+
+      return null;
+    }
+
       function pickRegDate(row) {
         const text = cleanText(row.textContent || "");
         const m1 = text.match(/\d{2}\.\d{2}\.\s*등록/);
@@ -546,6 +576,7 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
         const price = pickPrice(row, mallAnchor);
         const regDate = pickRegDate(row);
         const delivery = pickDelivery(row, mallAnchor);
+        const shipping_fee = parseShippingFee(delivery);
 
         if (debugSamples.length < 5) {
           debugSamples.push({
@@ -555,6 +586,7 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
             mallName,
             regDate,
             delivery,
+            shipping_fee,
             rowText: rowText.slice(0, 220)
           });
         }
@@ -567,18 +599,19 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
         if (seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
 
-        out.push({
-          keyword,
-          page: pageNo,
-          rank: out.length + 1,
-          title,
-          regDate,
-          mallName,
-          price,
-          delivery,
-          danawaListUrl,
-          danawaLinkHref
-        });
+      out.push({
+        keyword,
+        page: pageNo,
+        rank: out.length + 1,
+        title,
+        regDate,
+        mallName,
+        price,
+        delivery,
+        shipping_fee,
+        danawaListUrl,
+        danawaLinkHref
+      });
 
         if (out.length >= maxItemsPerPage) break;
       }
