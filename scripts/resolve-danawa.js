@@ -7,16 +7,17 @@ const KEYWORDS = [
   "삼다수 500ml",
   "삼다수 330ml",
   "가야워터 2L",
-  "가야워터 500ml",  
+  "가야워터 500ml",
 ];
 
 const START_PAGE = 1;
-const END_PAGE = 3;
+const END_PAGE = 1;
 
 // 액션 시간/차단 방지용
 const MAX_ITEMS_PER_PAGE = 120;
 const SLEEP_BETWEEN_LIST_PAGES_MS = 1200;
 const SLEEP_BETWEEN_RESOLVE_MS = 1200;
+const RESOLVE_CONCURRENCY = 3;
 
 const OUTPUT_DIR = "data";
 const OUTPUT_FILE = path.join(OUTPUT_DIR, "danawa-resolved.json");
@@ -141,7 +142,7 @@ function normalizeUrl(raw) {
       "wRef",
       "wTime",
       "redirect",
-      "mcid"
+      "mcid",
     ].forEach((k) => u.searchParams.delete(k));
 
     u.hash = "";
@@ -194,7 +195,7 @@ function unwrapTrackingUrl(rawUrl) {
       "goUrl",
       "dl",
       "returnUrl",
-      "return_url"
+      "return_url",
     ];
 
     for (const key of paramKeys) {
@@ -336,7 +337,7 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
 
   await page.goto(danawaListUrl, {
     waitUntil: "domcontentloaded",
-    timeout: 30000
+    timeout: 30000,
   });
 
   await page.waitForLoadState("networkidle").catch(() => {});
@@ -385,7 +386,7 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
           ".prod_info .prod_name a",
           "p.prod_name a",
           ".prod_name a",
-          "a[name='productName']"
+          "a[name='productName']",
         ];
 
         for (const selector of selectors) {
@@ -409,7 +410,7 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
           ".prod_info .prod_name a[href]",
           "p.prod_name a[href]",
           ".prod_name a[href]",
-          "a[name='productName'][href]"
+          "a[name='productName'][href]",
         ];
 
         for (const selector of selectors) {
@@ -427,7 +428,7 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
           "div.price_info li a.click_log_product_searched_price_",
           "ul.prod_pricelist li a.click_log_product_searched_price_",
           ".price_info li a",
-          ".prod_pricelist li a"
+          ".prod_pricelist li a",
         ];
 
         for (const selector of selectors) {
@@ -529,20 +530,20 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
         return "";
       }
 
-    function parseShippingFee(deliveryText) {
-      const text = cleanText(deliveryText);
+      function parseShippingFee(deliveryText) {
+        const text = cleanText(deliveryText);
 
-      if (!text) return null;
-      if (text.includes("무료배송")) return 0;
-      if (text.includes("배송비 무료")) return 0;
+        if (!text) return null;
+        if (text.includes("무료배송")) return 0;
+        if (text.includes("배송비 무료")) return 0;
 
-      const match = text.match(/배송비\s*([0-9][0-9,]*)\s*원/);
-      if (match?.[1]) {
-        return Number(match[1].replace(/[^\d]/g, ""));
+        const match = text.match(/배송비\s*([0-9][0-9,]*)\s*원/);
+        if (match?.[1]) {
+          return Number(match[1].replace(/[^\d]/g, ""));
+        }
+
+        return null;
       }
-
-      return null;
-    }
 
       function pickRegDate(row) {
         const text = cleanText(row.textContent || "");
@@ -590,7 +591,7 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
             regDate,
             delivery,
             shipping_fee,
-            rowText: rowText.slice(0, 220)
+            rowText: rowText.slice(0, 220),
           });
         }
 
@@ -602,19 +603,19 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
         if (seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
 
-      out.push({
-        keyword,
-        page: pageNo,
-        rank: out.length + 1,
-        title,
-        regDate,
-        mallName,
-        price,
-        delivery,
-        shipping_fee,
-        danawaListUrl,
-        danawaLinkHref
-      });
+        out.push({
+          keyword,
+          page: pageNo,
+          rank: out.length + 1,
+          title,
+          regDate,
+          mallName,
+          price,
+          delivery,
+          shipping_fee,
+          danawaListUrl,
+          danawaLinkHref,
+        });
 
         if (out.length >= maxItemsPerPage) break;
       }
@@ -623,7 +624,7 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
         rowCount: rows.length,
         extractedCount: out.length,
         debugSamples,
-        items: out
+        items: out,
       };
     },
     { keyword, pageNo, danawaListUrl, maxItemsPerPage: MAX_ITEMS_PER_PAGE }
@@ -643,7 +644,7 @@ async function scrapeDanawaListPage(page, { keyword, pageNo }) {
     ...item,
     bridgeUrl: item.danawaLinkHref.startsWith("http")
       ? item.danawaLinkHref
-      : new URL(item.danawaLinkHref, "https://search.danawa.com").toString()
+      : new URL(item.danawaLinkHref, "https://search.danawa.com").toString(),
   }));
 }
 
@@ -653,7 +654,7 @@ async function resolveItem(browser, item) {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     viewport: { width: 1440, height: 1200 },
     javaScriptEnabled: true,
-    ignoreHTTPSErrors: true
+    ignoreHTTPSErrors: true,
   });
 
   const page = await context.newPage();
@@ -690,13 +691,13 @@ async function resolveItem(browser, item) {
     canonicalUrl: null,
     finalProductUrl: null,
     redirectChain: [],
-    error: null
+    error: null,
   };
 
   try {
     await page.goto(item.bridgeUrl, {
       waitUntil: "domcontentloaded",
-      timeout: 20000
+      timeout: 20000,
     });
 
     await waitForFinalUrl(page, 15000);
@@ -706,7 +707,7 @@ async function resolveItem(browser, item) {
     const finalProductUrl = resolveFinalProductUrl({
       canonicalUrl,
       resolvedUrl,
-      redirectChain: hops.slice()
+      redirectChain: hops.slice(),
     });
 
     result.resolvedUrl = resolvedUrl;
@@ -727,7 +728,7 @@ async function main() {
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
 
   const browser = await chromium.launch({
-    headless: true
+    headless: true,
   });
 
   const listContext = await browser.newContext({
@@ -735,7 +736,7 @@ async function main() {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     viewport: { width: 1440, height: 1200 },
     javaScriptEnabled: true,
-    ignoreHTTPSErrors: true
+    ignoreHTTPSErrors: true,
   });
 
   const listPage = await listContext.newPage();
@@ -757,18 +758,46 @@ async function main() {
 
     console.log(`[LIST] total rows: ${listRows.length}`);
 
-    const results = [];
-    for (let i = 0; i < listRows.length; i += 1) {
-      const item = listRows[i];
-      console.log(
-        `[RESOLVE ${i + 1}/${listRows.length}] ${item.keyword} / p${item.page} / #${item.rank} / ${item.title}`
-      );
+    const results = new Array(listRows.length);
+    let nextIndex = 0;
 
-      const resolved = await resolveItem(browser, item);
-      results.push(resolved);
+    async function worker(workerId) {
+      while (true) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
 
-      await sleep(SLEEP_BETWEEN_RESOLVE_MS);
+        if (currentIndex >= listRows.length) break;
+
+        const item = listRows[currentIndex];
+
+        console.log(
+          `[W${workerId}] [RESOLVE ${currentIndex + 1}/${listRows.length}] ${item.keyword} / p${item.page} / #${item.rank} / ${item.title}`
+        );
+
+        try {
+          const resolved = await resolveItem(browser, item);
+          results[currentIndex] = resolved;
+        } catch (err) {
+          results[currentIndex] = {
+            ...item,
+            decodedSLink: extractSLink(item.bridgeUrl),
+            resolvedUrl: null,
+            canonicalUrl: null,
+            finalProductUrl: null,
+            redirectChain: [],
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+
+        await sleep(SLEEP_BETWEEN_RESOLVE_MS);
+      }
     }
+
+    await Promise.all(
+      Array.from({ length: RESOLVE_CONCURRENCY }, (_, i) => worker(i + 1))
+    );
+
+    const finalResults = results.filter(Boolean);
 
     await fs.writeFile(
       OUTPUT_FILE,
@@ -779,8 +808,9 @@ async function main() {
           startPage: START_PAGE,
           endPage: END_PAGE,
           maxItemsPerPage: MAX_ITEMS_PER_PAGE,
-          count: results.length,
-          results
+          resolveConcurrency: RESOLVE_CONCURRENCY,
+          count: finalResults.length,
+          results: finalResults,
         },
         null,
         2
