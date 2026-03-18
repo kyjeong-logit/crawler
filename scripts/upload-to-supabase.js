@@ -24,17 +24,33 @@ async function main() {
   const crawlBatchId =
     json.collectedAt?.replace(/[:.]/g, "-") || new Date().toISOString().replace(/[:.]/g, "-");
 
-  const rows = (json.results || []).map((item) => ({
-    source: "danawa",
-    keyword: item.keyword || null,
-    raw_title: item.title || null,
-    mall_name: item.mallName || null,
-    price: toIntPrice(item.price),
-    delivery: item.delivery || null,
-    final_product_url: item.finalProductUrl || null,
-    collected_at: json.collectedAt || new Date().toISOString(),
-    crawl_batch_id: crawlBatchId
-  }));
+  const rows = (json.results || []).map((item) => {
+    const price = toIntPrice(item.price);
+    const shippingFee =
+      item.shipping_fee === 0 || item.shipping_fee
+        ? Number(item.shipping_fee)
+        : null;
+
+    return {
+      source: "danawa",
+      keyword: item.keyword || null,
+      raw_title: item.title || null,
+      mall_name: item.mallName || null,
+      price,
+      delivery: item.delivery || null,
+      shipping_fee: shippingFee,
+      total_price:
+        price != null && shippingFee != null ? price + shippingFee : null,
+      final_product_url: item.finalProductUrl || null,
+      danawa_list_url: item.danawaListUrl || null,
+      danawa_link_href: item.danawaLinkHref || null,
+      resolved_url: item.resolvedUrl || null,
+      redirect_chain: item.redirectChain || null,
+      raw_payload: item,
+      collected_at: json.collectedAt || new Date().toISOString(),
+      crawl_batch_id: crawlBatchId
+    };
+  });
 
   const validRows = rows.filter((r) => r.keyword && r.raw_title);
 
