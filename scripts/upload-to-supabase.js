@@ -66,6 +66,16 @@ async function main() {
   }
 
   console.log(`Inserted ${validRows.length} rows into raw_prices`);
+
+  console.log("Running refresh_service_prices()...");
+  const { error: refreshError } = await supabase.rpc("refresh_service_prices");
+
+  if (refreshError) {
+    throw refreshError;
+  }
+
+  console.log("refresh_service_prices() executed successfully");
+
 }
 
 main().catch((err) => {
