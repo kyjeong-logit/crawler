@@ -15,7 +15,7 @@ const START_PAGE = 1;
 const END_PAGE = 1;
 
 // 액션 시간/차단 방지용
-const MAX_ITEMS_PER_PAGE = 20;
+const MAX_ITEMS_PER_PAGE = 120;
 const SLEEP_BETWEEN_LIST_PAGES_MS = 1200;
 const SLEEP_BETWEEN_RESOLVE_MS = 1200;
 const RESOLVE_CONCURRENCY = 3;
