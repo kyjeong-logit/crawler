@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import crypto from "crypto";
 import { chromium } from "playwright";
 
 const KEYWORDS = [
@@ -14,13 +15,18 @@ const START_PAGE = 1;
 const END_PAGE = 1;
 
 // 액션 시간/차단 방지용
-const MAX_ITEMS_PER_PAGE = 120;
+const MAX_ITEMS_PER_PAGE = 20;
 const SLEEP_BETWEEN_LIST_PAGES_MS = 1200;
 const SLEEP_BETWEEN_RESOLVE_MS = 1200;
 const RESOLVE_CONCURRENCY = 3;
 
 const OUTPUT_DIR = "data";
 const OUTPUT_FILE = path.join(OUTPUT_DIR, "danawa-resolved.json");
+
+const COUPANG_ACCESS_KEY = process.env.COUPANG_ACCESS_KEY || "";
+const COUPANG_SECRET_KEY = process.env.COUPANG_SECRET_KEY || "";
+
+const coupangDeeplinkCache = new Map();
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -292,6 +298,133 @@ function resolveFinalProductUrl({ canonicalUrl, resolvedUrl, redirectChain }) {
   if (resolved) return resolved;
 
   return null;
+}
+
+function isCoupangProductUrl(url) {
+  try {
+    const u = new URL(url);
+    return /(^|\.)coupang\.com$/i.test(u.hostname || "");
+  } catch {
+    return false;
+  }
+}
+
+function buildCoupangAuthHeader(method, pathWithQuery, accessKey, secretKey) {
+  const now = new Date();
+
+  const yy = String(now.getUTCFullYear()).slice(2);
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(now.getUTCDate()).padStart(2, "0");
+  const hh = String(now.getUTCHours()).padStart(2, "0");
+  const mi = String(now.getUTCMinutes()).padStart(2, "0");
+  const ss = String(now.getUTCSeconds()).padStart(2, "0");
+
+  const signedDate = `${yy}${mm}${dd}T${hh}${mi}${ss}Z`;
+
+  const [path, query = ""] = pathWithQuery.split("?");
+  const message = `${signedDate}${method}${path}${query}`;
+
+  const signature = crypto
+    .createHmac("sha256", secretKey)
+    .update(message, "utf8")
+    .digest("hex");
+
+  return `CEA algorithm=HmacSHA256, access-key=${accessKey}, signed-date=${signedDate}, signature=${signature}`;
+}
+
+function pickCoupangShortUrl(payload) {
+  const candidates = [
+    payload?.data,
+    payload?.rData,
+    payload?.resultData,
+    payload?.results,
+  ];
+
+  for (const arr of candidates) {
+    if (!Array.isArray(arr) || arr.length === 0) continue;
+
+    for (const row of arr) {
+      const shortUrl =
+        row?.shortenUrl ||
+        row?.shortURL ||
+        row?.shortUrl ||
+        row?.short_link ||
+        row?.shortLink ||
+        row?.deeplink;
+
+      if (typeof shortUrl === "string" && shortUrl.startsWith("http")) {
+        return shortUrl;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function createCoupangDeeplink(originalUrl) {
+  if (!originalUrl) return originalUrl;
+  if (!isCoupangProductUrl(originalUrl)) return originalUrl;
+
+  if (coupangDeeplinkCache.has(originalUrl)) {
+    return coupangDeeplinkCache.get(originalUrl);
+  }
+
+  if (!COUPANG_ACCESS_KEY || !COUPANG_SECRET_KEY) {
+    console.warn("[COUPANG] access/secret key 없음. 원본 URL 유지");
+    coupangDeeplinkCache.set(originalUrl, originalUrl);
+    return originalUrl;
+  }
+
+  const endpointCandidates = [
+    "/v2/providers/affiliate_open_api/apis/openapi/v1/deeplink",
+    "/v2/providers/affiliate_open_api/apis/openapi/deeplink",
+  ];
+
+  for (const apiPath of endpointCandidates) {
+    try {
+      const authHeader = buildCoupangAuthHeader(
+        "POST",
+        apiPath,
+        COUPANG_ACCESS_KEY,
+        COUPANG_SECRET_KEY
+      );
+
+      const res = await fetch(`https://api-gateway.coupang.com${apiPath}`, {
+        method: "POST",
+        headers: {
+          Authorization: authHeader,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          coupangUrls: [originalUrl],
+        }),
+      });
+
+      if (res.status === 404) {
+        continue;
+      }
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`status=${res.status} body=${text}`);
+      }
+
+      const data = await res.json();
+      const deepLink = pickCoupangShortUrl(data);
+
+      if (deepLink) {
+        coupangDeeplinkCache.set(originalUrl, deepLink);
+        return deepLink;
+      }
+
+      console.warn("[COUPANG] 응답 성공했으나 short url 없음:", JSON.stringify(data));
+    } catch (err) {
+      console.warn(`[COUPANG] Deeplink 변환 실패 (${apiPath})`, err);
+    }
+  }
+
+  coupangDeeplinkCache.set(originalUrl, originalUrl);
+  return originalUrl;
 }
 
 async function getCanonicalUrl(page) {
@@ -704,11 +837,16 @@ async function resolveItem(browser, item) {
 
     const resolvedUrl = page.url();
     const canonicalUrl = await getCanonicalUrl(page);
-    const finalProductUrl = resolveFinalProductUrl({
+
+    let finalProductUrl = resolveFinalProductUrl({
       canonicalUrl,
       resolvedUrl,
       redirectChain: hops.slice(),
     });
+
+    if (finalProductUrl && isCoupangProductUrl(finalProductUrl)) {
+      finalProductUrl = await createCoupangDeeplink(finalProductUrl);
+    }
 
     result.resolvedUrl = resolvedUrl;
     result.canonicalUrl = canonicalUrl;
