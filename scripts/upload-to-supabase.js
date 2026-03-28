@@ -11,6 +11,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const RAW_FILE = "data/danawa-resolved.json";
+const INSERT_BATCH_SIZE = 1000;
 
 function toIntPrice(v) {
   const n = String(v || "").replace(/[^\d]/g, "");
@@ -59,16 +60,20 @@ async function main() {
     return;
   }
 
-  const { error } = await supabase.from("raw_prices").insert(validRows);
-
-  if (error) {
-    throw error;
+  for (let i = 0; i < validRows.length; i += INSERT_BATCH_SIZE) {
+    const chunk = validRows.slice(i, i + INSERT_BATCH_SIZE);
+    const { error } = await supabase.from("raw_prices").insert(chunk);
+    if (error) {
+      throw error;
+    }
   }
 
   console.log(`Inserted ${validRows.length} rows into raw_prices`);
 
   console.log("Running refresh_service_prices()...");
-  const { error: refreshError } = await supabase.rpc("refresh_service_prices");
+  const { error: refreshError } = await supabase.rpc("refresh_service_prices", {
+    p_crawl_batch_id: crawlBatchId
+  });
 
   if (refreshError) {
     throw refreshError;
