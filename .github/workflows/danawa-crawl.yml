@@ -3,7 +3,7 @@ name: Danawa Crawl
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 0,9 * * *"
+    - cron: "0 14 * * *" # 매일 한국시간 23:00 (UTC 14:00)
 
 jobs:
   crawl-and-save:
